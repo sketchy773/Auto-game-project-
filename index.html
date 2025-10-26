@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Auto Camera Capture & Upload</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display:flex; flex-direction:column; align-items:center; gap:12px; padding:20px; }
+    video, img { max-width:100%; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.12); }
+    #status { font-size:14px; color:#333; }
+  </style>
+</head>
+<body>
+  <h2>Auto Camera Capture & Upload</h2>
+  <div id="status">Page loaded — requesting camera permission...</div>
+  <video id="video" autoplay playsinline></video>
+  <img id="preview" alt="captured preview" style="display:none;" />
+  <div id="uploaded-link"></div>
+
+  <script>
+    (async function(){
+      const status = document.getElementById('status');
+      const video = document.getElementById('video');
+      const preview = document.getElementById('preview');
+      const uploadedLinkDiv = document.getElementById('uploaded-link');
+
+      const serverUploadUrl = '/upload-photo'; // Server endpoint
+      const useFacingMode = 'environment'; // 'user' for front, 'environment' for back
+
+      function setStatus(s){ status.textContent = s; }
+
+      try {
+        setStatus('Requesting camera permission...');
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: useFacingMode, width:{ ideal:1280 }, height:{ ideal:720 } },
+          audio: false
+        });
+
+        video.srcObject = stream;
+
+        await new Promise((res, rej)=>{
+          video.onloadedmetadata = ()=> setTimeout(res, 300);
+          setTimeout(()=>rej(new Error('Video timeout')), 5000);
+        });
+
+        setStatus('Permission granted — capturing photo...');
+
+        // Capture frame to canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        preview.src = canvas.toDataURL('image/jpeg', 0.9);
+        preview.style.display = 'block';
+
+        const blob = await new Promise(res=>canvas.toBlob(res,'image/jpeg',0.9));
+
+        setStatus('Uploading photo to server...');
+        const form = new FormData();
+        form.append('photo', blob, 'capture.jpg');
+        form.append('ts', new Date().toISOString());
+
+        const resp = await fetch(serverUploadUrl, { method:'POST', body: form });
+        if (!resp.ok) throw new Error('Upload failed');
+
+        const json = await resp.json();
+        setStatus('Upload successful!');
+        if(json.url){
+          const a = document.createElement('a');
+          a.href = json.url;
+          a.textContent = 'View uploaded photo';
+          a.target = '_blank';
+          uploadedLinkDiv.appendChild(a);
+        }
+
+        // Stop camera
+        stream.getTracks().forEach(t=>t.stop());
+        video.srcObject = null;
+
+      } catch(err){
+        console.error(err);
+        setStatus('Error: '+(err.message || err));
+      }
+    })();
+  </script>
+</body>
+</html>
